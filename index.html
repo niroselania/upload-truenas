@@ -473,7 +473,12 @@
           "Authorization": basicAuthHeader(username, password),
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ path })
+        body: JSON.stringify({
+          path,
+          options: {
+            raise_chmod_error: false
+          }
+        })
       });
 
       const text = await response.text();

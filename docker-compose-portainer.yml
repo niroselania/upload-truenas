@@ -1,0 +1,292 @@
+services:
+  truenas-uploader:
+    image: nginx:1.27-alpine
+    container_name: truenas-uploader
+    restart: unless-stopped
+    ports:
+      - "8085:80"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat > /usr/share/nginx/html/index.html <<'HTML'
+        <!doctype html>
+        <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Subir a TrueNAS</title>
+          <style>
+            body { margin: 0; min-height: 100vh; background: #f6f7f9; color: #1e252c; font-family: Arial, Helvetica, sans-serif; }
+            main { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0; }
+            h1 { margin: 0 0 18px; font-size: 28px; }
+            .grid { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
+            section { background: #fff; border: 1px solid #d8dee6; border-radius: 8px; padding: 18px; box-shadow: 0 14px 36px rgba(27, 36, 48, .11); }
+            h2 { margin: 0 0 14px; font-size: 17px; }
+            label { display: block; margin: 14px 0 6px; color: #65717f; font-size: 13px; font-weight: 700; }
+            input { width: 100%; min-height: 42px; border: 1px solid #d8dee6; border-radius: 6px; padding: 9px 11px; font: inherit; box-sizing: border-box; }
+            input:focus { border-color: #0f766e; outline: 3px solid rgba(15, 118, 110, .16); }
+            .auth { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .hint { margin: 10px 0 0; color: #65717f; font-size: 13px; line-height: 1.45; }
+            .notice { margin-top: 18px; border-left: 4px solid #9a6700; padding: 12px 14px; background: #fff8e6; color: #5b3d00; font-size: 13px; line-height: 1.45; }
+            .dropzone { display: grid; place-items: center; min-height: 220px; border: 2px dashed #aab7c4; border-radius: 8px; background: #f9fbfc; text-align: center; }
+            .dropzone.drag { border-color: #0f766e; background: #edf8f6; }
+            .dropzone strong { display: block; margin-bottom: 8px; font-size: 18px; }
+            .file-input { max-width: 340px; margin-top: 14px; }
+            .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+            button { min-height: 42px; border: 0; border-radius: 6px; padding: 10px 14px; color: #fff; background: #0f766e; font: inherit; font-weight: 700; cursor: pointer; }
+            button.secondary { border: 1px solid #d8dee6; color: #1e252c; background: #fff; }
+            button:disabled { opacity: .55; cursor: not-allowed; }
+            .queue { margin-top: 16px; display: grid; gap: 10px; }
+            .file-row { border: 1px solid #d8dee6; border-radius: 8px; padding: 12px; background: #fff; }
+            .file-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+            .file-name { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+            .file-size { color: #65717f; font-size: 12px; white-space: nowrap; }
+            progress { width: 100%; height: 12px; accent-color: #0f766e; }
+            .status { margin-top: 6px; color: #65717f; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+            .status.ok { color: #147d3f; }
+            .status.error { color: #b42318; }
+            @media (max-width: 780px) { main { width: min(100% - 24px, 920px); padding: 18px 0; } .grid, .auth { display: block; } section + section { margin-top: 14px; } }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Subir archivos a TrueNAS</h1>
+            <div class="grid">
+              <section>
+                <h2>Conexion</h2>
+                <label for="serverUrl">Servidor TrueNAS o proxy</label>
+                <input id="serverUrl" type="text" value="/truenas" autocomplete="off">
+                <p class="hint">En Portainer dejalo como <strong>/truenas</strong>.</p>
+                <label for="targetDir">Carpeta destino</label>
+                <input id="targetDir" type="text" value="/mnt/NVME/upload" autocomplete="off">
+                <div class="auth">
+                  <div>
+                    <label for="username">Usuario</label>
+                    <input id="username" type="text" placeholder="root o admin" autocomplete="username">
+                  </div>
+                  <div>
+                    <label for="password">Clave</label>
+                    <input id="password" type="password" autocomplete="current-password">
+                  </div>
+                </div>
+                <div class="notice">Las credenciales se usan solo mientras esta pagina esta abierta. El proxy Nginx evita CORS contra TrueNAS.</div>
+              </section>
+              <section>
+                <h2>Archivos</h2>
+                <div id="dropzone" class="dropzone">
+                  <div>
+                    <strong>Arrastra archivos aca</strong>
+                    <span class="hint">o elegi archivos o carpetas con los selectores</span>
+                    <input id="files" class="file-input" type="file" multiple>
+                    <input id="folder" class="file-input" type="file" webkitdirectory directory multiple>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button id="uploadBtn" disabled>Subir</button>
+                  <button id="clearBtn" class="secondary" type="button" disabled>Limpiar</button>
+                </div>
+                <div id="queue" class="queue" aria-live="polite"></div>
+              </section>
+            </div>
+          </main>
+          <script>
+            const serverUrlInput = document.querySelector("#serverUrl");
+            const targetDirInput = document.querySelector("#targetDir");
+            const usernameInput = document.querySelector("#username");
+            const passwordInput = document.querySelector("#password");
+            const filesInput = document.querySelector("#files");
+            const folderInput = document.querySelector("#folder");
+            const dropzone = document.querySelector("#dropzone");
+            const uploadBtn = document.querySelector("#uploadBtn");
+            const clearBtn = document.querySelector("#clearBtn");
+            const queue = document.querySelector("#queue");
+            let selectedFiles = [];
+            let uploading = false;
+            const createdDirectories = new Set();
+            function formatBytes(bytes) {
+              const units = ["B", "KB", "MB", "GB", "TB"];
+              let size = bytes;
+              let unit = 0;
+              while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+              return `$${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} $${units[unit]}`;
+            }
+            function safeFileName(name) {
+              return name.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+$$/, "_");
+            }
+            function safeRelativePath(path) {
+              return path
+                .split(/[\\/]+/)
+                .filter((part) => part && part !== "." && part !== "..")
+                .map(safeFileName)
+                .join("/");
+            }
+            function fileDisplayPath(file) {
+              return file.webkitRelativePath || file.name;
+            }
+            function joinPath(dir, relativePath) {
+              return `$${dir.replace(/\/+$$/, "")}/$${safeRelativePath(relativePath)}`;
+            }
+            function parentDirectories(baseDir, relativePath) {
+              const parts = safeRelativePath(relativePath).split("/").filter(Boolean);
+              parts.pop();
+              const dirs = [];
+              let current = baseDir.replace(/\/+$$/, "");
+              parts.forEach((part) => {
+                current = `$${current}/$${part}`;
+                dirs.push(current);
+              });
+              return dirs;
+            }
+            function basicAuthHeader(user, pass) {
+              const bytes = new TextEncoder().encode(`$${user}:$${pass}`);
+              let binary = "";
+              bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+              return `Basic $${btoa(binary)}`;
+            }
+            function setControls() {
+              uploadBtn.disabled = uploading || selectedFiles.length === 0;
+              clearBtn.disabled = uploading || selectedFiles.length === 0;
+              filesInput.disabled = uploading;
+              folderInput.disabled = uploading;
+            }
+            function renderQueue() {
+              queue.innerHTML = "";
+              selectedFiles.forEach((file, index) => {
+                const row = document.createElement("div");
+                row.className = "file-row";
+                row.dataset.index = String(index);
+                row.innerHTML = `<div class="file-meta"><div class="file-name"></div><div class="file-size"></div></div><progress max="100" value="0"></progress><div class="status">Pendiente</div>`;
+                row.querySelector(".file-name").textContent = fileDisplayPath(file);
+                row.querySelector(".file-size").textContent = formatBytes(file.size);
+                queue.appendChild(row);
+              });
+              setControls();
+            }
+            function addFiles(fileList) {
+              selectedFiles = [...selectedFiles, ...Array.from(fileList)];
+              renderQueue();
+            }
+            function updateRow(index, percent, message, type = "") {
+              const row = queue.querySelector(`[data-index="$${index}"]`);
+              if (!row) return;
+              row.querySelector("progress").value = Math.max(0, Math.min(100, percent));
+              const status = row.querySelector(".status");
+              status.className = `status $${type}`.trim();
+              status.textContent = message;
+            }
+            async function ensureDirectory(serverUrl, username, password, path) {
+              if (createdDirectories.has(path)) return;
+              const response = await fetch(`$${serverUrl}/api/filesystem/mkdir`, {
+                method: "POST",
+                headers: {
+                  "Authorization": basicAuthHeader(username, password),
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  path,
+                  options: {
+                    raise_chmod_error: false
+                  }
+                })
+              });
+              const text = await response.text();
+              if (!response.ok && !/exist|EEXIST|already/i.test(text)) {
+                throw new Error(`No se pudo crear la carpeta $${path}: $${text || response.statusText}`);
+              }
+              createdDirectories.add(path);
+            }
+            async function uploadFile(file, index) {
+              const serverUrl = serverUrlInput.value.trim().replace(/\/+$$/, "");
+              const targetDir = targetDirInput.value.trim();
+              const username = usernameInput.value.trim();
+              const password = passwordInput.value;
+              if (!serverUrl || !targetDir || !username || !password) {
+                throw new Error("Completa servidor/proxy, carpeta destino, usuario y clave.");
+              }
+              const targetPath = joinPath(targetDir, fileDisplayPath(file));
+              const dirs = parentDirectories(targetDir, fileDisplayPath(file));
+              for (const dir of dirs) {
+                updateRow(index, 1, `Creando carpeta $${dir}...`);
+                await ensureDirectory(serverUrl, username, password, dir);
+              }
+              return new Promise((resolve, reject) => {
+                const form = new FormData();
+                form.append("data", JSON.stringify({ method: "filesystem.put", params: [targetPath, { append: false }] }));
+                form.append("file", file, safeFileName(file.name));
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", `$${serverUrl}/_upload/`);
+                xhr.setRequestHeader("Authorization", basicAuthHeader(username, password));
+                xhr.upload.onprogress = (event) => {
+                  if (!event.lengthComputable) { updateRow(index, 50, `Subiendo a $${targetPath}...`); return; }
+                  updateRow(index, Math.round((event.loaded / event.total) * 100), `Subiendo a $${targetPath}...`);
+                };
+                xhr.onload = () => {
+                  const text = xhr.responseText || "";
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    let response = {};
+                    try { response = text ? JSON.parse(text) : {}; } catch { response = {}; }
+                    updateRow(index, 100, `Subida enviada correctamente.$${response.job_id ? ` Trabajo #$${response.job_id}.` : ""}`, "ok");
+                    resolve(response);
+                    return;
+                  }
+                  reject(new Error(`TrueNAS respondio HTTP $${xhr.status}: $${text || xhr.statusText}`));
+                };
+                xhr.onerror = () => reject(new Error("No se pudo conectar. Revisa red, proxy y que TrueNAS acepte /_upload/."));
+                xhr.onabort = () => reject(new Error("Subida cancelada."));
+                updateRow(index, 1, `Preparando $${targetPath}...`);
+                xhr.send(form);
+              });
+            }
+            filesInput.addEventListener("change", () => { addFiles(filesInput.files); filesInput.value = ""; });
+            folderInput.addEventListener("change", () => { addFiles(folderInput.files); folderInput.value = ""; });
+            ["dragenter", "dragover"].forEach((name) => dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.add("drag"); }));
+            ["dragleave", "drop"].forEach((name) => dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.remove("drag"); }));
+            dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+            clearBtn.addEventListener("click", () => { selectedFiles = []; renderQueue(); });
+            uploadBtn.addEventListener("click", async () => {
+              uploading = true;
+              setControls();
+              for (let index = 0; index < selectedFiles.length; index += 1) {
+                try { await uploadFile(selectedFiles[index], index); } catch (error) { updateRow(index, 0, error.message, "error"); }
+              }
+              uploading = false;
+              setControls();
+            });
+          </script>
+        </body>
+        </html>
+        HTML
+        cat > /etc/nginx/conf.d/default.conf <<'NGINX'
+        server {
+            listen 80;
+            server_name _;
+            root /usr/share/nginx/html;
+            index index.html;
+            client_max_body_size 0;
+            location / {
+                try_files $$uri $$uri/ /index.html;
+            }
+            location /truenas/_upload/ {
+                proxy_pass http://192.168.1.120/_upload/;
+                proxy_http_version 1.1;
+                proxy_request_buffering off;
+                proxy_buffering off;
+                proxy_read_timeout 3600s;
+                proxy_send_timeout 3600s;
+                proxy_set_header Host 192.168.1.120;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+            }
+            location /truenas/api/ {
+                proxy_pass http://192.168.1.120/api/v2.0/;
+                proxy_http_version 1.1;
+                proxy_set_header Host 192.168.1.120;
+                proxy_set_header X-Real-IP $$remote_addr;
+                proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $$scheme;
+            }
+        }
+        NGINX
+        nginx -g 'daemon off;'
