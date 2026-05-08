@@ -21,10 +21,36 @@ services:
     ports:
       - "8085:80"
     volumes:
-      - ./:/usr/share/nginx/html:ro
-    command: >
-      sh -c "cp /usr/share/nginx/html/nginx.conf /etc/nginx/conf.d/default.conf
-      && nginx -g 'daemon off;'"
+      - ./:/app:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cp /app/index.html /usr/share/nginx/html/index.html
+        printf '%s\n' \
+          'server {' \
+          '    listen 80;' \
+          '    server_name _;' \
+          '    root /usr/share/nginx/html;' \
+          '    index index.html;' \
+          '    client_max_body_size 0;' \
+          '    location / {' \
+          '        try_files $$uri $$uri/ /index.html;' \
+          '    }' \
+          '    location /truenas/_upload/ {' \
+          '        proxy_pass http://192.168.1.120/_upload/;' \
+          '        proxy_http_version 1.1;' \
+          '        proxy_request_buffering off;' \
+          '        proxy_buffering off;' \
+          '        proxy_read_timeout 3600s;' \
+          '        proxy_send_timeout 3600s;' \
+          '        proxy_set_header Host 192.168.1.120;' \
+          '        proxy_set_header X-Real-IP $$remote_addr;' \
+          '        proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;' \
+          '        proxy_set_header X-Forwarded-Proto $$scheme;' \
+          '    }' \
+          '}' > /etc/nginx/conf.d/default.conf
+        nginx -g 'daemon off;'
 ```
 
 ## Uso
