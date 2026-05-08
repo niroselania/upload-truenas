@@ -4,11 +4,9 @@ Pagina web simple para subir archivos al dataset `/mnt/NVME/upload` en TrueNAS.
 
 ## Portainer
 
-1. Subi este proyecto a GitHub.
-2. En Portainer, entra a **Stacks**.
-3. Crea un stack nuevo desde **Repository**.
-4. Usa el repositorio de GitHub y el archivo `docker-compose.yml`.
-5. Deploy.
+La opcion mas confiable es usar **Stacks > Add stack > Web editor** y pegar el contenido de `docker-compose-portainer.yml`.
+
+Ese compose no depende de archivos externos, volumenes ni descarga desde GitHub.
 
 Por defecto publica la pagina en el puerto `8085`. El stack usa la imagen oficial de Nginx, sin `build`, para evitar errores de permisos en Portainer.
 
@@ -59,6 +57,7 @@ services:
 - Dejar el campo **Servidor TrueNAS o proxy** como `/truenas`
 - Usar como destino `/mnt/NVME/upload`
 - Ingresar usuario y clave de TrueNAS
-- Seleccionar o arrastrar archivos
+- Seleccionar archivos o carpetas
+- Las carpetas se suben conservando subcarpetas dentro de `/mnt/NVME/upload`
 
 El contenedor incluye un proxy Nginx hacia `http://192.168.1.120/_upload/` para evitar problemas de CORS.

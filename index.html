@@ -334,8 +334,9 @@
         <div id="dropzone" class="dropzone">
           <div>
             <strong>Arrastra archivos aca</strong>
-            <span class="hint">o elegilos con el selector</span>
+            <span class="hint">o elegi archivos o carpetas con los selectores</span>
             <input id="files" class="file-input" type="file" multiple>
+            <input id="folder" class="file-input" type="file" webkitdirectory directory multiple>
           </div>
         </div>
 
@@ -355,6 +356,7 @@
     const usernameInput = document.querySelector("#username");
     const passwordInput = document.querySelector("#password");
     const filesInput = document.querySelector("#files");
+    const folderInput = document.querySelector("#folder");
     const dropzone = document.querySelector("#dropzone");
     const uploadBtn = document.querySelector("#uploadBtn");
     const clearBtn = document.querySelector("#clearBtn");
@@ -362,6 +364,7 @@
 
     let selectedFiles = [];
     let uploading = false;
+    const createdDirectories = new Set();
 
     function formatBytes(bytes) {
       const units = ["B", "KB", "MB", "GB", "TB"];
@@ -378,8 +381,33 @@
       return name.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+$/, "_");
     }
 
-    function joinPath(dir, fileName) {
-      return `${dir.replace(/\/+$/, "")}/${safeFileName(fileName)}`;
+    function safeRelativePath(path) {
+      return path
+        .split(/[\\/]+/)
+        .filter((part) => part && part !== "." && part !== "..")
+        .map(safeFileName)
+        .join("/");
+    }
+
+    function fileDisplayPath(file) {
+      return file.webkitRelativePath || file.name;
+    }
+
+    function joinPath(dir, relativePath) {
+      return `${dir.replace(/\/+$/, "")}/${safeRelativePath(relativePath)}`;
+    }
+
+    function parentDirectories(baseDir, relativePath) {
+      const parts = safeRelativePath(relativePath).split("/").filter(Boolean);
+      parts.pop();
+
+      const dirs = [];
+      let current = baseDir.replace(/\/+$/, "");
+      parts.forEach((part) => {
+        current = `${current}/${part}`;
+        dirs.push(current);
+      });
+      return dirs;
     }
 
     function basicAuthHeader(user, pass) {
@@ -396,6 +424,7 @@
       uploadBtn.disabled = uploading || selectedFiles.length === 0;
       clearBtn.disabled = uploading || selectedFiles.length === 0;
       filesInput.disabled = uploading;
+      folderInput.disabled = uploading;
     }
 
     function renderQueue() {
@@ -412,7 +441,7 @@
           <progress max="100" value="0"></progress>
           <div class="status">Pendiente</div>
         `;
-        row.querySelector(".file-name").textContent = file.name;
+        row.querySelector(".file-name").textContent = fileDisplayPath(file);
         row.querySelector(".file-size").textContent = formatBytes(file.size);
         queue.appendChild(row);
       });
@@ -435,19 +464,44 @@
       status.textContent = message;
     }
 
-    function uploadFile(file, index) {
+    async function ensureDirectory(serverUrl, username, password, path) {
+      if (createdDirectories.has(path)) return;
+
+      const response = await fetch(`${serverUrl}/api/filesystem/mkdir`, {
+        method: "POST",
+        headers: {
+          "Authorization": basicAuthHeader(username, password),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ path })
+      });
+
+      const text = await response.text();
+      if (!response.ok && !/exist|EEXIST|already/i.test(text)) {
+        throw new Error(`No se pudo crear la carpeta ${path}: ${text || response.statusText}`);
+      }
+
+      createdDirectories.add(path);
+    }
+
+    async function uploadFile(file, index) {
+      const serverUrl = serverUrlInput.value.trim().replace(/\/+$/, "");
+      const targetDir = targetDirInput.value.trim();
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!serverUrl || !targetDir || !username || !password) {
+        throw new Error("Completa servidor/proxy, carpeta destino, usuario y clave.");
+      }
+
+      const targetPath = joinPath(targetDir, fileDisplayPath(file));
+      const dirs = parentDirectories(targetDir, fileDisplayPath(file));
+      for (const dir of dirs) {
+        updateRow(index, 1, `Creando carpeta ${dir}...`);
+        await ensureDirectory(serverUrl, username, password, dir);
+      }
+
       return new Promise((resolve, reject) => {
-        const serverUrl = serverUrlInput.value.trim().replace(/\/+$/, "");
-        const targetDir = targetDirInput.value.trim();
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value;
-
-        if (!serverUrl || !targetDir || !username || !password) {
-          reject(new Error("Completa servidor/proxy, carpeta destino, usuario y clave."));
-          return;
-        }
-
-        const targetPath = joinPath(targetDir, file.name);
         const form = new FormData();
         form.append("data", JSON.stringify({
           method: "filesystem.put",
@@ -500,6 +554,11 @@
     filesInput.addEventListener("change", () => {
       addFiles(filesInput.files);
       filesInput.value = "";
+    });
+
+    folderInput.addEventListener("change", () => {
+      addFiles(folderInput.files);
+      folderInput.value = "";
     });
 
     ["dragenter", "dragover"].forEach((name) => {
