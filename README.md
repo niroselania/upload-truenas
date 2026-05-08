@@ -20,13 +20,13 @@ services:
     restart: unless-stopped
     ports:
       - "8085:80"
-    volumes:
-      - ./:/app:ro
+    environment:
+      APP_INDEX_URL: "https://raw.githubusercontent.com/niroselania/truenas-uploader/main/index.html"
     command:
       - /bin/sh
       - -c
       - |
-        cp /app/index.html /usr/share/nginx/html/index.html
+        wget -O /usr/share/nginx/html/index.html "$$APP_INDEX_URL"
         printf '%s\n' \
           'server {' \
           '    listen 80;' \
