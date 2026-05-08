@@ -10,16 +10,21 @@ Pagina web simple para subir archivos al dataset `/mnt/NVME/upload` en TrueNAS.
 4. Usa el repositorio de GitHub y el archivo `docker-compose.yml`.
 5. Deploy.
 
-Por defecto publica la pagina en el puerto `8085`.
+Por defecto publica la pagina en el puerto `8085`. El stack usa la imagen oficial de Nginx, sin `build`, para evitar errores de permisos en Portainer.
 
 ```yaml
 services:
   truenas-uploader:
-    build: .
+    image: nginx:1.27-alpine
     container_name: truenas-uploader
     restart: unless-stopped
     ports:
       - "8085:80"
+    volumes:
+      - ./:/usr/share/nginx/html:ro
+    command: >
+      sh -c "cp /usr/share/nginx/html/nginx.conf /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
 ```
 
 ## Uso
