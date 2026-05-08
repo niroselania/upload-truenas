@@ -1,0 +1,7 @@
+services:
+  truenas-uploader:
+    build: .
+    container_name: truenas-uploader
+    restart: unless-stopped
+    ports:
+      - "8085:80"
