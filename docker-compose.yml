@@ -1,7 +1,10 @@
 services:
   truenas-uploader:
-    build: .
+    image: nginx:1.27-alpine
     container_name: truenas-uploader
     restart: unless-stopped
     ports:
       - "8085:80"
+    volumes:
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
